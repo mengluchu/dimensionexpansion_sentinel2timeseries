@@ -1,0 +1,83 @@
+---
+title: "deform"
+output: html_document
+date: '2024-12-18'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r}
+library(terra)
+library(sp)
+library(gstat)
+library(ncdf4)
+setwd("~/Documents/work/sentinel2dimexp/")
+#a1_fire=nc_open("~/Downloads/210_Sentinel2_to_XarrayDS_to_Rectangles_1000m/092_Features_100px_NC_Store/Feature_01523gc_0087lc_20170412T093031_Fire_1.10m_100px_nc")
+ 
+a1=nc_open("210_Sentinel2_to_XarrayDS_to_Rectangles_1000m/092_Features_100px_NC_Store/Feature_01935gc_0096lc_20171118T093251_Tillage_3.10m_100px_nc")
+ 
+B08 <- ncvar_get(a1, "B08") #read a band
+B04 <- ncvar_get(a1, "B04") #read a band
+NDVI=(B08-B04)/(B08+B04)
+x <- ncvar_get(a1, "x")
+y <- ncvar_get(a1, "y")
+timesenti <- ncvar_get(a1, "time")
+r=rast(NDVI, extent=ext(min(x), max(x), min(y), max(y)), crs="+init=epsg:32632")
+ 
+#names(r)=timesenti
+timesenti_readable=as.POSIXlt(timesenti,origin="2017-01-02 09:34:02")
+names(r)=timesenti_readable
+```
+ 
+```{r pressure, echo=FALSE}
+  w_variogram = function(layernr)
+    {rn <- subset(r, layernr)
+  
+  # Convert raster to a data frame
+  points_df <- as.data.frame(rn, xy = TRUE, na.rm = TRUE)
+  
+  # Check if there is valid data
+  if (nrow(points_df) == 0) {
+    cat("Skipping layer", layernr, "due to no data.\n")
+    next
+  }
+  
+  # Rename the value column
+  names(points_df)[3] <- "timestep"
+  
+  # Convert to SpatialPointsDataFrame
+  coordinates(points_df) <- ~ x + y
+  
+  # Print diagnostic information
+  cat("Processing layer:", layernr, "\n")
+  #print(head(points_df))  # Verify extracted data
+  
+  # Compute the variogram and verify it
+  vg <- tryCatch({
+    gstat::variogram(timestep ~ 1, points_df)
+  }, error = function(e) {
+    cat("Error computing variogram for layer", layernr, ":", e$message, "\n")
+    NULL
+  })
+  
+  # Skip if variogram computation failed
+  if (is.null(vg)) {
+    next
+  }
+  
+ 
+  # Use on.exit to ensure dev.off() is always called
+  #on.exit(dev.off(), add = TRUE)
+  # Plot the variogram
+  tryCatch({
+    plot(vg, main = paste0("Variogram of timestep ", layernr))
+  }, error = function(e) {
+    cat("Error plotting variogram for layer", layernr, ":", e$message, "\n")
+  })
+  }
+```
+```{r}
+lapply(1:100,w_variogram)
+```
+ 

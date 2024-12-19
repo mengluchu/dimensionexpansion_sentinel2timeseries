@@ -1,0 +1,171 @@
+---
+title: "opendata_NRBP"
+output: html_document
+date: '2024-12-18'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#install.packages("terra")
+library(terra)
+#a=rast("Downloads/210_Sentinel2_to_XarrayDS_to_Rectangles_1000m/092_Features_100px_NC_Store/Feature_01523gc_0087lc_20170412T093031_Fire_1.10m_100px_nc")
+
+#install.packages("ncdf4")
+library(ncdf4)
+library(ggplot2)
+library(strucchange)
+ library(RColorBrewer) 
+library(grid)
+```
+ 
+```{r pressure, echo=FALSE}
+# direct reading from terra mixes spectral bands and time. 
+
+setwd("~/Documents/work/sentinel2dimexp/")
+#a1_fire=nc_open("~/Downloads/210_Sentinel2_to_XarrayDS_to_Rectangles_1000m/092_Features_100px_NC_Store/Feature_01523gc_0087lc_20170412T093031_Fire_1.10m_100px_nc")
+ 
+a1=nc_open("210_Sentinel2_to_XarrayDS_to_Rectangles_1000m/092_Features_100px_NC_Store/Feature_01935gc_0096lc_20171118T093251_Tillage_3.10m_100px_nc")
+SCL <- ncvar_get(a1, "SCL") #read a band
+
+B_nir = ncvar_get(a1, "B08") #read a band
+B_red = ncvar_get(a1, "B04")  
+B_blue = ncvar_get(a1, "B02")  
+B_green =ncvar_get(a1, "B03")
+
+NDVI=(B_nir-B_red)/(B_nir+B_red)
+NRBP = (B_red-B_blue)/(B_red+B_blue) #NRBP=Red+Blue / Red−Blue​
+
+x <- ncvar_get(a1, "x")
+y <- ncvar_get(a1, "y")
+timesenti <- ncvar_get(a1, "time")
+#r=rast(NDVI, extent=ext(min(x), max(x), min(y), max(y)), crs="+init=epsg:32632")
+r=rast(NRBP, extent=ext(min(x), max(x), min(y), max(y)), crs="+init=epsg:32632")
+ 
+#names(r)=timesenti
+timesenti_readable=as.POSIXlt(timesenti,origin="2017-01-02 09:34:02")
+names(r)=timesenti_readable
+```
+
+Visualise the false color images:
+Red Areas → Healthy vegetation (forests, croplands, grasslands).
+Dark Blue/Black Areas → Water bodies (rivers, lakes, wetlands).
+Gray/White/Blue Areas → Urban infrastructure or bare ground.
+Light Cyan/White → Clouds, snow, or high-altitude regions.
+Brown/Orange Areas → Sparse or stressed vegetation.
+
+
+```{r eval=T}
+rgreen=rast(B_green, extent=ext(min(x), max(x), min(y), max(y)), crs="+init=epsg:32632")
+
+rnir=rast(B_nir, extent=ext(min(x), max(x), min(y), max(y)), crs="+init=epsg:32632")
+
+rred=rast(B_red, extent=ext(min(x), max(x), min(y), max(y)), crs="+init=epsg:32632")
+
+ 
+rcomp1 = c(rnir,rred,rgreen)
+every = 5
+for (nn in seq(1,338, by = every)){
+plotRGB(rcomp1,
+        r = nn,  # NIR in the Red channel
+        g = nn+338,  # Red in the Green channel
+        b = nn+338*2,  # Green in the Blue channel
+        scale = 65535,  # Adjust based on your data range (e.g., 0–255 or 0–65535)
+        stretch = "lin",  # Linear stretch for better visualization
+        main = as.character(timesenti_readable[nn]))
+  title(main =  paste0(as.character(timesenti_readable[nn])," SCL:",as.character(SCL[1,1,nn])))
+}
+
+```
+
+
+```{r plot, echo=FALSE}
+every=4 # plot every e.g. 4 images
+#pdf(file=paste0("tillageb_ndvi_every",every,".pdf"))
+#defalut raster plot 16 each graph
+plot(subset(r, seq(1+every*0,nlyr(r),by=every)))
+plot(subset(r, seq(1+every*16,nlyr(r),by=every)))
+plot(subset(r, seq(1+every*32,nlyr(r),by=every)))
+plot(subset(r, seq(1+every*64,nlyr(r),by=every)))
+#dev.off() 
+```
+
+sample and plot time series
+```{r sample}
+samplepoints <- spatSample(r, size = 100, method = "random", na.rm = FALSE, xy = TRUE, cells=T)
+plot(subset(r,1), main = "Raster with Sampled Points", legend = TRUE)
+points(samplepoints[, c("x", "y")], col = "red", pch = 20, cex = 1)
+legend("top", legend = "Sampled Points", pch = 20, col = "red",cex=0.8)
+```
+
+
+```{r plotsampletimeseries}
+
+# Print the sampled points
+get_sample_ts = function(coor_id, sample_points=samplepoints){
+  coords <- sample_points[coor_id , c("x", "y")]
+  # Extract the time series (values across all layers) at this location
+time_series <- terra::extract(r, coords)
+as.numeric(time_series)
+  time_steps <-  timesenti_readable
+  
+  # Combine extracted time series with time steps
+  time_series_df <- data.frame(Date = time_steps, Value = as.numeric(time_series[1, -1]))
+#  plot(time_series_df, typ="l")
+ 
+
+# Plot the time series
+  return(time_series_df)
+
+}
+plot_sample_ts = function(coor_id, sample_points=samplepoints){
+   time_series_df =  get_sample_ts(coor_id, sample_points=samplepoints)
+gg = ggplot(time_series_df, aes(x = Date, y = Value)) +
+  geom_line(color = "blue") +           # Line plot
+  geom_point(color = "red") +           # Add points
+  labs(
+    title = "NDVI Time Series Plot",
+    x = "Date",
+    y = "NDVI Value"
+  ) +
+  theme_minimal()  # Clean theme
+ #grid::grid.draw(ggplotGrob(gg)) 
+}
+```
+
+```{r}
+random_integers <- sample(1:100, size = 20, replace = FALSE)
+
+ lapply(random_integers, plot_sample_ts,samplepoints)
+```
+ Quick test using efp.
+```{r}
+efptest=function(id){
+tsdf = get_sample_ts(id)
+ts_zoo = zoo(tsdf)
+zoo_data <- zoo(tsdf$Value, order.by = tsdf$Date)
+ 
+bp <- efp(zoo_data~1)
+plot(bp)
+## calculate corresponding test statistic
+test = sctest(bp)
+return(test$p.value)
+}
+#if(test$p.value<0.05){
+#  id1 = cbind(id1, id)
+ # print(paste0(id,":",test$p.value))
+#  }
+#return(id1)
+#}
+ 
+```
+```{r}
+a = lapply(1:100, efptest)
+a1 = as.numeric(a)
+which(a1<0.05)
+a1[a1 <0.05]
+```
+
+
